@@ -294,18 +294,20 @@ class MultinomialDiffusion(torch.nn.Module):
 
     def compute_Lt(self, log_x_start, log_x_t, t, detach_mean=False):
         log_true_prob = self.q_posterior(
-            log_x_start=log_x_start, log_x_t=log_x_t, t=t)
+            log_x_start=log_x_start, log_x_t=log_x_t, t=t)  # (bsz, num_classes, seq_size), q(x_{t-1} | x_t, x_0)
 
-        log_model_prob = self.p_pred(log_x=log_x_t, t=t)
+        log_model_prob = self.p_pred(log_x=log_x_t, t=t)  # (bsz, num_classes, seq_size), p(x_{t-1} | x_t)
 
         if detach_mean:
             log_model_prob = log_model_prob.detach()
 
-        kl = self.multinomial_kl(log_true_prob, log_model_prob)
-        kl = sum_except_batch(kl)
+        # for t>=2, E_{q(x_t|x_0)} KL[q_(x_{t-1}|x_t, x_0) || p(x_{t-1} | x_t)]
+        kl = self.multinomial_kl(log_true_prob, log_model_prob)  # (bsz, seq_size)
+        kl = sum_except_batch(kl)  # (bsz, )
 
-        decoder_nll = -log_categorical(log_x_start, log_model_prob)
-        decoder_nll = sum_except_batch(decoder_nll)
+        # t=1, E_{q(x_1|x_0)} log p_\theta (x_0 | x_1)
+        decoder_nll = -log_categorical(log_x_start, log_model_prob)  # (bsz, num_classes, seq_size) *2 -> (bsz, seq_size)
+        decoder_nll = sum_except_batch(decoder_nll)  # (bsz, )
 
         mask = (t == torch.zeros_like(t)).float()
         loss = mask * decoder_nll + (1. - mask) * kl
